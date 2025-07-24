@@ -49,10 +49,8 @@ WEATHER_CODES = {
 # --- Data Fetching Functions ---
 @st.cache_data(ttl=600)
 def get_all_cities_data():
-    """Fetches current data for all cities for the heatmap and summary table."""
     lats = [city['lat'] for city in CITIES.values()]
     lons = [city['lon'] for city in CITIES.values()]
-    # Fetch additional parameters for the summary table
     url = (
         f"https://api.open-meteo.com/v1/forecast"
         f"?latitude={','.join(map(str, lats))}&longitude={','.join(map(str, lons))}"
@@ -66,7 +64,6 @@ def get_all_cities_data():
 
 @st.cache_data(ttl=600)
 def get_forecast_data(lat, lon):
-    """Fetches forecast data for a single selected city."""
     url = (
         f"https://api.open-meteo.com/v1/forecast"
         f"?latitude={lat}&longitude={lon}"
@@ -83,7 +80,6 @@ def get_forecast_data(lat, lon):
 
 @st.cache_data(ttl=3600)
 def get_historical_data(lat, lon):
-    """Fetches recent historical data for the selected city."""
     start_date = "2025-04-22"
     end_date = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
     url = (
@@ -100,16 +96,9 @@ def get_historical_data(lat, lon):
 
 # --- UI Layout ---
 st.sidebar.title("Dashboard Controls")
-
-# Create navigation options, with "Home" as the first option
 sorted_cities = sorted(CITIES.keys())
 page_options = ["--- HOME ---"] + sorted_cities
-
-selected_page = st.sidebar.selectbox(
-    "Select a View",
-    page_options,
-    index=0  # Default to the "HOME" view
-)
+selected_page = st.sidebar.selectbox("Select a View", page_options, index=0)
 
 st.title(f"🇲🇾 Malaysian Weather Dashboard")
 
@@ -119,46 +108,55 @@ if selected_page == "--- HOME ---":
     all_cities_data = get_all_cities_data()
 
     if all_cities_data:
-        # --- MAP ---
-        map_data = []
         summary_data = []
         for i, city_name in enumerate(CITIES.keys()):
             city_api_data = all_cities_data[i]
             current = city_api_data['current']
-
-            # Data for the map
-            map_data.append({
-                "name": city_name, "lat": city_api_data["latitude"], "lon": city_api_data["longitude"],
-                "temp": current['temperature_2m'], "precip": current['precipitation']
-            })
-
-            # Data for the summary table
-            weather_desc, weather_icon = WEATHER_CODES.get(current['weather_code'], ("Unknown", ""))
             summary_data.append({
-                "City": city_name,
-                "Condition": f"{weather_icon} {weather_desc}",
-                "Temp (°C)": current['temperature_2m'],
-                "Rain (mm/hr)": current['precipitation'],
-                "Humidity (%)": current['relative_humidity_2m'],
-                "Wind (km/h)": current['wind_speed_10m']
+                "City": city_name, "lat": city_api_data["latitude"], "lon": city_api_data["longitude"],
+                "Temp (°C)": current['temperature_2m'], "Rain (mm/hr)": current['precipitation'],
+                "Humidity (%)": current['relative_humidity_2m'], "Wind (km/h)": current['wind_speed_10m']
             })
+        summary_df = pd.DataFrame(summary_data)
 
-        # --- Display Map ---
-        map_df = pd.DataFrame(map_data)
-        map_df['size'] = map_df['precip'].apply(lambda x: x if x > 0 else 0.1)
-        fig_map = px.scatter_mapbox(map_df, lat="lat", lon="lon", color="temp", size="size", hover_name="name",
-                                    custom_data=['temp', 'precip'], color_continuous_scale=px.colors.sequential.Plasma,
-                                    size_max=20, zoom=4.5, mapbox_style="carto-positron",
-                                    center={"lat": 4.21, "lon": 108.2})
-        fig_map.update_traces(
-            hovertemplate='<b>%{hovertext}</b><br><br>Temperature: %{customdata[0]:.1f}°C<br>Precipitation: %{customdata[1]:.1f} mm<extra></extra>')
-        fig_map.update_layout(margin={"r": 0, "t": 0, "l": 0, "b": 0}, legend_title_text='Temp (°C)')
-        st.plotly_chart(fig_map, use_container_width=True)
+        # --- NEW: Create columns for map and analytics ---
+        col1, col2 = st.columns([3, 1])  # Give the map more space
+
+        with col1:
+            # --- Display Map ---
+            summary_df['size'] = summary_df['Rain (mm/hr)'].apply(lambda x: x if x > 0 else 0.1)
+            fig_map = px.scatter_mapbox(summary_df, lat="lat", lon="lon", color="Temp (°C)", size="size",
+                                        hover_name="City",
+                                        custom_data=['Temp (°C)', 'Rain (mm/hr)'],
+                                        color_continuous_scale='RdYlGn_r',  # Green-to-Red scale
+                                        size_max=20, zoom=4.5, mapbox_style="carto-positron",
+                                        center={"lat": 4.21, "lon": 108.2})
+            fig_map.update_traces(
+                hovertemplate='<b>%{hovertext}</b><br><br>Temperature: %{customdata[0]:.1f}°C<br>Precipitation: %{customdata[1]:.1f} mm<extra></extra>')
+            fig_map.update_layout(margin={"r": 0, "t": 0, "l": 0, "b": 0}, legend_title_text='Temp (°C)')
+            st.plotly_chart(fig_map, use_container_width=True)
+
+        with col2:
+            # --- NEW: Display Analytics Panel ---
+            st.subheader("Live National Summary")
+
+            avg_temp = summary_df['Temp (°C)'].mean()
+            hottest_city = summary_df.loc[summary_df['Temp (°C)'].idxmax()]
+            coldest_city = summary_df.loc[summary_df['Temp (°C)'].idxmin()]
+            rainiest_city = summary_df.loc[summary_df['Rain (mm/hr)'].idxmax()]
+
+            st.metric("National Average Temp", f"{avg_temp:.1f} °C")
+            st.metric("Hottest City", f"{hottest_city['City']}", f"{hottest_city['Temp (°C)']:.1f} °C")
+            st.metric("Coldest City", f"{coldest_city['City']}", f"{coldest_city['Temp (°C)']:.1f} °C")
+            if rainiest_city['Rain (mm/hr)'] > 0:
+                st.metric("Most Rainfall", f"{rainiest_city['City']}", f"{rainiest_city['Rain (mm/hr)']:.1f} mm/hr")
+            else:
+                st.metric("Most Rainfall", "No rain reported")
 
         # --- Display Summary Table ---
         st.subheader("Current Conditions Across Malaysia")
-        summary_df = pd.DataFrame(summary_data)
-        st.dataframe(summary_df, use_container_width=True, hide_index=True)
+        st.dataframe(summary_df[["City", "Temp (°C)", "Rain (mm/hr)", "Humidity (%)", "Wind (km/h)"]],
+                     use_container_width=True, hide_index=True)
 
     else:
         st.warning("Could not load national overview data.")
