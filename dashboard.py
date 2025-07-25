@@ -4,37 +4,78 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
+import json
 
 # --- Configuration ---
 # Page config must be the first Streamlit command
 st.set_page_config(layout="wide", page_title="Malaysian Weather Dashboard", page_icon="🇲🇾")
 
 # --- City Data ---
-CITIES = {
-    "Kangar": {"lat": 6.44, "lon": 100.19}, "Alor Setar": {"lat": 6.12, "lon": 100.37},
-    "George Town": {"lat": 5.41, "lon": 100.33}, "Butterworth": {"lat": 5.40, "lon": 100.37},
-    "Bukit Mertajam": {"lat": 5.36, "lon": 100.46}, "Seberang Jaya": {"lat": 5.39, "lon": 100.40},
-    "Sungai Petani": {"lat": 5.65, "lon": 100.49}, "Taiping": {"lat": 4.85, "lon": 100.73},
-    "Ipoh": {"lat": 4.60, "lon": 101.08}, "Batu Gajah": {"lat": 4.47, "lon": 101.04},
-    "Teluk Intan": {"lat": 4.02, "lon": 101.02}, "Klang": {"lat": 3.03, "lon": 101.45},
-    "Shah Alam": {"lat": 3.07, "lon": 101.52}, "Petaling Jaya": {"lat": 3.11, "lon": 101.60},
-    "Kuala Lumpur": {"lat": 3.14, "lon": 101.69}, "Kajang": {"lat": 2.99, "lon": 101.79},
-    "Putrajaya": {"lat": 2.93, "lon": 101.69}, "Seremban": {"lat": 2.73, "lon": 101.94},
-    "Port Dickson": {"lat": 2.52, "lon": 101.80}, "Melaka": {"lat": 2.19, "lon": 102.25},
-    "Muar": {"lat": 2.05, "lon": 102.57}, "Batu Pahat": {"lat": 1.85, "lon": 102.93},
-    "Kluang": {"lat": 2.03, "lon": 103.32}, "Kulai": {"lat": 1.66, "lon": 103.60},
-    "Johor Bahru": {"lat": 1.49, "lon": 103.74}, "Pasir Gudang": {"lat": 1.46, "lon": 103.90},
-    "Taman Johor Jaya": {"lat": 1.52, "lon": 103.79}, "Segamat": {"lat": 2.51, "lon": 102.82},
-    "Kota Bharu": {"lat": 6.13, "lon": 102.24}, "Tumpat": {"lat": 6.20, "lon": 102.17},
-    "Kuala Terengganu": {"lat": 5.33, "lon": 103.14}, "Cukai": {"lat": 4.23, "lon": 103.42},
-    "Kuantan": {"lat": 3.81, "lon": 103.33},
-    "Kuching": {"lat": 1.55, "lon": 110.34}, "Simanggang": {"lat": 1.25, "lon": 111.45},
-    "Sibu": {"lat": 2.30, "lon": 111.82}, "Bintulu": {"lat": 3.17, "lon": 113.03},
-    "Miri": {"lat": 4.41, "lon": 114.01}, "Labuan": {"lat": 5.28, "lon": 115.24},
-    "Kota Kinabalu": {"lat": 5.98, "lon": 116.07}, "Tuaran": {"lat": 6.18, "lon": 116.23},
-    "Keningau": {"lat": 5.34, "lon": 116.16}, "Sandakan": {"lat": 5.84, "lon": 118.12},
-    "Lahad Datu": {"lat": 5.03, "lon": 118.34}, "Tawau": {"lat": 4.25, "lon": 117.89},
-}
+def extract_coordinates_from_csv(file_path):
+    """
+    Reads a CSV file, extracts coordinates, and returns a clean DataFrame
+    with duplicate cities removed.
+
+    Args:
+        file_path (str): The path to the postcode CSV file.
+
+    Returns:
+        pandas.DataFrame: A DataFrame with 'city', 'longitude', and 'latitude' columns.
+    """
+    try:
+        # Read the CSV file using the 'latin1' encoding
+        df = pd.read_csv(file_path, encoding='latin1')
+
+        # --- Extract Latitude and Longitude ---
+        coord_pattern = r'POINT\(([\d.-]+) ([\d.-]+)\)'
+        extracted_coords = df['point_coord'].str.extract(coord_pattern)
+
+        # Assign the extracted numbers to new columns
+        df['latitude'] = pd.to_numeric(extracted_coords[0])
+        df['longitude'] = pd.to_numeric(extracted_coords[1])
+
+        # --- Create and Clean the DataFrame ---
+        final_df = df[['city', 'longitude', 'latitude']]
+        final_df = final_df.dropna()
+        final_df = final_df.drop_duplicates(subset=['city']).reset_index(drop=True)
+
+        return final_df
+
+    except FileNotFoundError:
+        print(f"Error: The file '{file_path}' was not found.")
+        return None
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        return None
+
+
+def dataframe_to_cities_dict(df):
+    """
+    Converts the DataFrame into a dictionary with the specified format.
+
+    Args:
+        df (pandas.DataFrame): The DataFrame with city, latitude, and longitude.
+
+    Returns:
+        dict: A dictionary in the format {"City": {"lat": ..., "lon": ...}}.
+    """
+    # Rename columns to match the desired dictionary keys
+    df = df.rename(columns={'latitude': 'lat', 'longitude': 'lon'})
+
+    # Set 'city' as the index and convert the DataFrame to a dictionary
+    cities_dict = df.set_index('city').to_dict('index')
+
+    return cities_dict
+
+
+# --- How to use it ---
+file_path = 'postcode-list.csv'
+coordinates_df = extract_coordinates_from_csv(file_path)
+
+if coordinates_df is not None:
+    # Convert the DataFrame to the desired dictionary format
+    CITIES = dataframe_to_cities_dict(coordinates_df)
+
 TIMEZONE = "Asia/Kuala_Lumpur"
 WEATHER_CODES = {
     0: ("Clear", "☀️"), 1: ("Mainly clear", "🌤️"), 2: ("Partly cloudy", "⛅️"),
